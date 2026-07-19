@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>台語口語練習錄音(手機版)</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            padding: 20px;
+            max-width: 600px; /* 手機版窄螢幕寬度限制 */
+            margin: 0 auto;
+            text-align: center;
+            background-color: #eef2f3;
+        }
+        .quiz-container {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.08);
+        }
+        h2 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+        .setup-section {
+            margin-bottom: 15px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            text-align: left;
+        }
+        .setup-section label {
+            font-weight: bold;
+            color: #34495e;
+            display: block;
+            margin-bottom: 6px;
+        }
+        .input-flex {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        input[type="number"], input[type="text"], select {
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 6px;
+            border: 1px solid #bdc3c7;
+            box-sizing: border-box;
+        }
+        .input-main { width: 100%; }
+        .input-short { width: 100px; }
+        #timerDisplay {
+            font-size: 72px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin: 20px 0;
+        }
+        .action-btn {
+            font-size: 18px;
+            padding: 12px 30px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            margin: 5px;
+            width: 45%;
+        }
+        #recordBtn { background-color: #e67e22; color: white; }
+        #recordBtn:disabled { background-color: #bdc3c7; }
+        #stopBtn { background-color: #c0392b; color: white; }
+        #stopBtn:disabled { background-color: #bdc3c7; }
+        #statusMsg {
+            margin-top: 20px;
+            font-weight: 500;
+            color: #7f8c8d;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="quiz-container">
+    <h2>台語口語練習錄音</h2>
+    
+    <div class="setup-section">
+        <label>1. 班級座號設定（可自由伸縮人數）</label>
+        <div class="input-flex">
+            <span>總人數：</span>
+            <input type="number" id="totalStudents" class="input-short" value="30" min="1" max="100" oninput="generateSeatMenu()">
+            <span>請選座號：</span>
+            <select id="seatNumber" style="flex-grow: 1;">
+                <option value="">-- 請選取 --</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="setup-section">
+        <label>2. 練習項目與時間自訂（彈性運用）</label>
+        <div style="margin-bottom: 8px;">
+            <span style="font-size: 14px; color: #7f8c8d;">項目名稱：</span>
+            <input type="text" id="quizName" class="input-main" value="第一項目：口語表達" oninput="updateTimerFromInput()">
+        </div>
+        <div class="input-flex">
+            <span style="font-size: 14px; color: #7f8c8d;">錄音長度：</span>
+            <input type="number" id="quizSeconds" class="input-short" value="60" min="5" oninput="updateTimerFromInput()">
+            <span>秒</span>
+            <span style="font-size: 13px; color: #e67e22; margin-left: 10px;" id="beepRuleMsg">(最後 10 秒響 1 聲)</span>
+        </div>
+    </div>
+
+    <div id="timerDisplay">01:00</div>
+
+    <div style="display: flex; justify-content: space-around;">
+        <button id="recordBtn" class="action-btn">開始錄音</button>
+        <button id="stopBtn" class="action-btn" disabled>停止並上傳</button>
+    </div>
+
+    <div id="statusMsg">請檢查上方設定，確認後即可點擊「開始錄音」</div>
+</div>
+
+<script>
+    const googleScriptUrl = 'https://script.google.com/macros/s/AKfycbwU9V9oT0yN9X7bF6R7B1oD_G4f2M1Xw_example/exec'; 
+
+    let mediaRecorder;
+    let audioChunks = [];
+    let timerInterval;
+    let allocatedTime = 60;
+    let hasPlayedAlert = false; 
+
+    const recordBtn = document.getElementById('recordBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const timerDisplay = document.getElementById('timerDisplay');
+    const statusMsg = document.getElementById('statusMsg');
+    const seatSelect = document.getElementById('seatNumber');
+    const totalStudentsInput = document.getElementById('totalStudents');
+    const quizNameInput = document.getElementById('quizName');
+    const quizSecondsInput = document.getElementById('quizSeconds');
+    const beepRuleMsg = document.getElementById('beepRuleMsg');
+
+    function generateSeatMenu() {
+        let maxCount = parseInt(totalStudentsInput.value) || 30;
+        if (maxCount < 1) maxCount = 1;
+        let currentSelected = seatSelect.value;
+        seatSelect.innerHTML = '<option value="">-- 請選取 --</option>';
+        for (let i = 1; i <= maxCount; i++) {
+            let opt = document.createElement('option');
+            let formattedNumber = i.toString().padStart(2, '0');
+            opt.value = formattedNumber;
+            opt.textContent = formattedNumber + " 號";
+            if (formattedNumber === currentSelected) opt.selected = true;
+            seatSelect.appendChild(opt);
+        }
+    }
+
+    function updateTimerFromInput() {
+        let sec = parseInt(quizSecondsInput.value) || 60;
+        allocatedTime = sec;
+        let m = Math.floor(sec / 60);
+        let s = sec % 60;
+        timerDisplay.textContent = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        
+        if (sec === 30 || sec === 60) {
+            beepRuleMsg.textContent = "(最後 10 秒響 1 聲)";
+        } else if (sec === 90 || sec === 120) {
+            beepRuleMsg.textContent = "(最後 20 秒響 2 聲)";
+        } else {
+            if (sec >= 90) {
+                beepRuleMsg.textContent = "(最後 20 秒響 2 聲)";
+            } else {
+                beepRuleMsg.textContent = "(最後 10 秒響 1 聲)";
+            }
+        }
+    }
+
+    function playAlertBeep(count) {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function makeBeep(delay) {
+            setTimeout(() => {
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(850, audioCtx.currentTime); 
+                gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime); 
+                oscillator.start();
+                setTimeout(() => oscillator.stop(), 180); 
+            }, delay);
+        }
+        if (count === 1) makeBeep(0);
+        else if (count === 2) { makeBeep(0); makeBeep(350); }
+    }
+
+    recordBtn.addEventListener('click', async () => {
+        if (seatSelect.value === "") { alert("請先選取座號！"); return; }
+        if (quizNameInput.value.trim() === "") { alert("請輸入項目名稱！"); return; }
+        audioChunks = [];
+        hasPlayedAlert = false;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+            mediaRecorder.onstop = () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                uploadFile(audioBlob);
+                stream.getTracks().forEach(track => track.stop());
+            };
+            mediaRecorder.start();
+            recordBtn.disabled = true; stopBtn.disabled = false; seatSelect.disabled = true;
+            totalStudentsInput.disabled = true; quizNameInput.disabled = true; quizSecondsInput.disabled = true;
+            statusMsg.textContent = '🎙️ 錄音進行中，時間到將自動存檔安全上傳...';
+            let timeLeft = allocatedTime;
+            let triggerTime = (allocatedTime >= 90) ? 20 : 10;
+            let beepCount = (allocatedTime >= 90) ? 2 : 1;
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                let m = Math.floor(timeLeft / 60);
+                let s = timeLeft % 60;
+                timerDisplay.textContent = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+                if (timeLeft === triggerTime && !hasPlayedAlert) {
+                    playAlertBeep(beepCount);
+                    hasPlayedAlert = true;
+                    statusMsg.textContent = `⚠️ 注意：倒數 ${triggerTime} 秒！提示音已響。`;
+                }
+                if (timeLeft <= 0) { clearInterval(timerInterval); handleStop(); }
+            }, 1000);
+        } catch (err) { alert('麥克風啟動失敗，請確認瀏覽器已允許麥克風權限。'); }
+    });
+
+    stopBtn.addEventListener('click', () => { clearInterval(timerInterval); handleStop(); });
+    function handleStop() { if (mediaRecorder && mediaRecorder.state !== 'inactive') { mediaRecorder.stop(); recordBtn.disabled = true; stopBtn.disabled = true; statusMsg.textContent = '錄音結束，正在安全處理音檔...'; } }
+
+    function uploadFile(blob) {
+        statusMsg.textContent = '安全加密傳輸中，請勿關閉網頁...';
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = () => {
+            const base64 = reader.result.split(',')[1];
+            const cleanQuizName = quizNameInput.value.replace(/[\/\\:*?"<>|]/g, '_');
+            const customFileName = `座號${seatSelect.value}_台語練習_${cleanQuizName}_${new Date().getTime()}.webm`;
+            fetch(googleScriptUrl, { method: 'POST', body: JSON.stringify({ audioData: base64, fileName: customFileName }) })
+            .then(res => res.json())
+            .then(resData => {
+                if (resData.status === 'success') {
+                    statusMsg.textContent = `✨ 音檔已安全隱密送達 truemy 雲端硬碟！(座號: ${seatSelect.value})`;
+                    recordBtn.disabled = false; seatSelect.disabled = false; totalStudentsInput.disabled = false; quizNameInput.disabled = false; quizSecondsInput.disabled = false; updateTimerFromInput();
+                } else { statusMsg.textContent = '上傳失敗：' + resData.message; recordBtn.disabled = false; seatSelect.disabled = false; }
+            }).catch(err => { statusMsg.textContent = '網路異常，請檢查網路連線。'; recordBtn.disabled = false; seatSelect.disabled = false; });
+        };
+    }
+    generateSeatMenu();
+    updateTimerFromInput();
+</script>
+</body>
+</html>
