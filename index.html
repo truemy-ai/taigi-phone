@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>手機版教學用口語錄音系統</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+            text-align: center;
+            background-color: #fbebee;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        button {
+            font-size: 18px;
+            padding: 12px 24px;
+            margin: 10px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .btn-start { background-color: #e67e22; color: white; }
+        .btn-start:disabled { background-color: #bdc3c7; }
+        .btn-stop { background-color: #c0392b; color: white; }
+        #timer {
+            font-size: 48px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin: 20px 0;
+        }
+        #status {
+            margin-top: 15px;
+            color: #7f8c8d;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>手機版教學用口語錄音系統</h2>
+    <p>請允許麥克風存取權限，並於點擊開始後開始作答。</p>
+    <div id="timer">00:00</div>
+    <button id="startBtn" class="btn-start">開始錄音</button>
+    <button id="stopBtn" class="btn-stop" disabled>停止並上傳</button>
+    <div id="status">準備就緒</div>
+</div>
+
+<script>
+    // 🎯 這裡已經幫您自動填好您剛才提供的手機專用網址了
+    const googleScriptUrl = 'https://script.google.com/macros/s/AKfycbwkZQW83dQpVi6PYfm5VUK2rB92yF1mlyZhq5Q782wDX1-_Td3NZqI_crPEb3J_liT7/exec';
+    
+    let mediaRecorder;
+    let audioChunks = [];
+    let countdownInterval;
+    let remainingTime = 60; 
+    
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const timerDisplay = document.getElementById('timer');
+    const statusDisplay = document.getElementById('status');
+    
+    function updateTimerDisplay(secs) {
+        let mins = Math.floor(secs / 60);
+        let remSecs = secs % 60;
+        timerDisplay.textContent = `${mins.toString().padStart(2, '0')}:${remSecs.toString().padStart(2, '0')}`;
+    }
+    
+    startBtn.addEventListener('click', async () => {
+        audioChunks = [];
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = event => {
+                audioChunks.push(event.data);
+            };
+            mediaRecorder.onstop = () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                uploadAudio(audioBlob);
+                stream.getTracks().forEach(track => track.stop());
+            };
+            mediaRecorder.start();
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            statusDisplay.textContent = '錄音中...';
+            remainingTime = 60; 
+            updateTimerDisplay(remainingTime);
+            
+            countdownInterval = setInterval(() => {
+                remainingTime--;
+                updateTimerDisplay(remainingTime);
+                if (remainingTime <= 0) {
+                    clearInterval(countdownInterval);
+                    stopRecording();
+                }
+            }, 1000);
+        } catch (err) {
+            alert('無法存取麥克風，請檢查權限設定。');
+            statusDisplay.textContent = '權限錯誤';
+        }
+    });
+    
+    stopBtn.addEventListener('click', () => {
+        clearInterval(countdownInterval);
+        stopRecording();
+    });
+    
+    function stopRecording() {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            statusDisplay.textContent = '錄音結束，正在處理檔案...';
+        }
+    }
+    
+    function uploadAudio(blob) {
+        statusDisplay.textContent = '正在上傳至 taigi_phone_recordings 資料夾...';
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = function() {
+            const base64Data = reader.result.split(',')[1];
+            fetch(googleScriptUrl, {
+                method: 'POST',
+                body: JSON.stringify({
+                    audioData: base64Data,
+                    // 🎯 自動加上「手機_」前綴辨識
+                    fileName: `手機_口語測驗_${new Date().getTime()}.webm`
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.status === 'success') {
+                    statusDisplay.textContent = '✨ 上傳成功！音檔已送達雲端手機專屬資料夾。';
+                } else {
+                    statusDisplay.textContent = '上傳失敗：' + data.message;
+                }
+            })
+            .catch(err => {
+                statusDisplay.textContent = '網路錯誤，上傳失敗。';
+                console.error(err);
+            });
+        };
+    }
+</script>
+</body>
+</html>
