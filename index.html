@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>手機版教學用口語錄音系統</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+            text-align: center;
+            background-color: #fbebee;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .input-group {
+            margin: 15px 0;
+            font-size: 18px;
+            text-align: left;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+        }
+        .input-group input, .input-group select {
+            font-size: 18px;
+            padding: 8px;
+            border: 2px solid #bdc3c7;
+            border-radius: 5px;
+        }
+        .input-group input {
+            width: 80px;
+            text-align: center;
+        }
+        .input-group select {
+            width: 220px;
+        }
+        button {
+            font-size: 18px;
+            padding: 12px 24px;
+            margin: 10px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .btn-start { background-color: #e67e22; color: white; }
+        .btn-start:disabled { background-color: #bdc3c7; }
+        .btn-stop { background-color: #c0392b; color: white; }
+        #timer {
+            font-size: 48px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin: 20px 0;
+        }
+        #status {
+            margin-top: 15px;
+            color: #7f8c8d;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>手機版教學用口語錄音系統</h2>
+    <p>請輸入座號、選擇項目後點擊開始錄音。</p>
+    
+    <!-- 座號輸入功能 -->
+    <div class="input-group">
+        <label for="seatNumber">請輸入座號：</label>
+        <div>
+            <input type="number" id="seatNumber" min="1" max="99" placeholder="例如: 05"> 號
+        </div>
+    </div>
+
+    <!-- 🎯 評量項目挑選選單 -->
+    <div class="input-group">
+        <label for="taskSelect">請選擇評量項目：</label>
+        <select id="taskSelect"></select>
+    </div>
+
+    <div id="timer">00:00</div>
+    <button id="startBtn" class="btn-start">開始錄音</button>
+    <button id="stopBtn" class="btn-stop" disabled>停止並上傳</button>
+    <div id="status">準備就緒</div>
+</div>
+
+<script>
+    // 🎯 【機動調整區】老師未來可以直接在這裡修改項目名稱與秒數
+    const examTasks = [
+        { name: "1.唸課文", seconds: 60 },
+        { name: "2.看圖講古", seconds: 60 },
+        { name: "3.發音朗讀", seconds: 30 },
+        { name: "4.看卡通講台語", seconds: 90 }
+    ];
+
+    // 手機專用後端 GAS 網址
+    const googleScriptUrl = 'https://script.google.com/macros/s/AKfycbwkZQW83dQpVi6PYfm5VUK2rB92yF1mlyZhq5Q782wDX1-_Td3NZqI_crPEb3J_liT7/exec';
+    
+    let mediaRecorder;
+    let audioChunks = [];
+    let countdownInterval;
+    let remainingTime = 60;
+    let currentMaxSeconds = 60; 
+    
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const timerDisplay = document.getElementById('timer');
+    const statusDisplay = document.getElementById('status');
+    const seatNumberInput = document.getElementById('seatNumber');
+    const taskSelect = document.getElementById('taskSelect');
+
+    // 建立內建網頁提示音（免外接音檔）
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playBeep() {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime); // 嗶聲頻率
+        gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+        osc.start();
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+        osc.stop(audioCtx.currentTime + 0.4);
+    }
+    
+    // 初始化選單與時間顯示
+    examTasks.forEach((task, index) => {
+        const opt = document.createElement('option');
+        opt.value = index;
+        opt.textContent = `${task.name} (${task.seconds}秒)`;
+        taskSelect.appendChild(opt);
+    });
+
+    function changeTask() {
+        const selectedTask = examTasks[taskSelect.value];
+        currentMaxSeconds = selectedTask.seconds;
+        remainingTime = selectedTask.seconds;
+        updateTimerDisplay(remainingTime);
+    }
+    taskSelect.addEventListener('change', changeTask);
+    changeTask();
+    
+    function updateTimerDisplay(secs) {
+        let mins = Math.floor(secs / 60);
+        let remSecs = secs % 60;
+        timerDisplay.textContent = `${mins.toString().padStart(2, '0')}:${remSecs.toString().padStart(2, '0')}`;
+    }
+    
+    startBtn.addEventListener('click', async () => {
+        const seatNum = seatNumberInput.value.trim();
+        if (!seatNum) {
+            alert('請先輸入座號再開始錄音！');
+            return;
+        }
+
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+
+        audioChunks = [];
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = event => {
+                audioChunks.push(event.data);
+            };
+            mediaRecorder.onstop = () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                uploadAudio(audioBlob, seatNum, examTasks[taskSelect.value].name);
+                stream.getTracks().forEach(track => track.stop());
+            };
+            mediaRecorder.start();
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            seatNumberInput.disabled = true;
+            taskSelect.disabled = true;
+            statusDisplay.textContent = '錄音中...';
+            
+            countdownInterval = setInterval(() => {
+                remainingTime--;
+                updateTimerDisplay(remainingTime);
+                if (remainingTime <= 0) {
+                    clearInterval(countdownInterval);
+                    
+                    // 🎯 提示音判定：90秒以上(包含)響兩聲，小於90秒響一聲
+                    if (currentMaxSeconds >= 90) {
+                        playBeep();
+                        setTimeout(playBeep, 500); // 隔 0.5 秒響第二聲
+                    } else {
+                        playBeep();
+                    }
+                    
+                    stopRecording();
+                }
+            }, 1000);
+        } catch (err) {
+            alert('無法存取麥克風，請檢查權限設定。');
+            statusDisplay.textContent = '權限錯誤';
+        }
+    });
+    
+    stopBtn.addEventListener('click', () => {
+        clearInterval(countdownInterval);
+        stopRecording();
+    });
+    
+    function stopRecording() {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            seatNumberInput.disabled = false;
+            taskSelect.disabled = false;
+            statusDisplay.textContent = '錄音結束，正在處理檔案...';
+        }
+    }
+    
+    function uploadAudio(blob, seatNum, taskName) {
+        statusDisplay.textContent = '正在上傳至 taigi_phone_recordings 資料夾...';
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = function() {
+            const base64Data = reader.result.split(',')[1];
+            const formattedSeat = seatNum.padStart(2, '0');
+            const cleanTaskName = taskName.replace(/^[0-9]./, "");
+            
+            fetch(googleScriptUrl, {
+                method: 'POST',
+                body: JSON.stringify({
+                    audioData: base64Data,
+                    // 🎯 雲端檔名會自動帶上手機前綴與項目名稱
+                    fileName: `手機_${formattedSeat}號_${cleanTaskName}_${new Date().getTime()}.webm`
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.status === 'success') {
+                    statusDisplay.textContent = `✨ 上傳成功！${formattedSeat}號的【${cleanTaskName}】音檔已送達。`;
+                } else {
+                    statusDisplay.textContent = '上傳失敗：' + data.message;
+                }
+            })
+            .catch(err => {
+                statusDisplay.textContent = '網路錯誤，上傳失敗。';
+                console.error(err);
+            });
+        };
+    }
+</script>
+</body>
+</html>
